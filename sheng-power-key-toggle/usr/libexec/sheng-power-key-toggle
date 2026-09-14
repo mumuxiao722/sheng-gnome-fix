@@ -1,0 +1,228 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 mumuxiao722 <zy349931@163.com>
+# sheng-power-key-toggle - blank/restore the display with the power
+# key on the Xiaomi Pad 6S Pro (sheng) instead of suspending.
+#
+# Adapted from the NixOS implementation in DotRedstone/nixos-sheng:
+#   nixos/profiles/gnome-minimal.nix  (systemd.services.sheng-power-key-display-toggle)
+#
+# Rationale: deep sleep cannot be woken reliably on this device. A wakeup that
+# is pending during the CPU-freeze step aborts the suspend (kernel: "Wakeup
+# pending. Abort CPU freeze") and leaves a black, unresponsive screen until a
+# forced reboot. This service:
+#   1. exclusively grabs the physical power button so GNOME/libinput never
+#      sees a power-key suspend/wake request (removes the wake race), and
+#   2. turns each press into a mutter org.gnome.Mutter.DisplayConfig
+#      PowerSaveMode toggle (3 = blank/display off, 0 = on), also locking the
+#      session via logind when blanking so the next wake lands on the screen
+#      lock.
+# Waking injects a KEY_WAKEUP event to force a screen repaint.
+#
+# The suspend feature itself is disabled system-wide via the packaged
+# sleep.conf.d drop-in (AllowSuspend=no) and the GNOME power settings
+# gschema override. Together with this service, "sleep" on sheng only ever
+# means "display off, session locked".
+
+import evdev
+import subprocess
+import sys
+import time
+import os
+import signal
+
+from evdev import ecodes, UInput
+
+LOGINCTL = "/usr/bin/loginctl"
+BUSCTL = "/usr/bin/busctl"
+RUNUSER = "/usr/sbin/runuser"
+ID = "/usr/bin/id"
+
+# evdev device name of the PMIC power key on sheng ("pmic_pwrkey").
+PWRKEY_NAME_HINTS = ("pwrkey", "power-key")
+
+# Keep a global reference so the UInput device survives garbage collection.
+_ui = None
+
+
+def log(msg):
+    print(f"sheng-power-key-toggle: {msg}", file=sys.stderr, flush=True)
+
+
+def get_power_device():
+    """Return the physical power-key evdev device."""
+    for path in evdev.list_devices():
+        try:
+            dev = evdev.InputDevice(path)
+            caps = dev.capabilities()
+            if ecodes.KEY_POWER not in caps.get(ecodes.EV_KEY, ()):
+                continue
+            name = (dev.name or "").lower()
+            if any(hint in name for hint in PWRKEY_NAME_HINTS):
+                return dev
+        except Exception:
+            continue
+    return None
+
+
+def find_active_session():
+    """Return (uid, username) of the active graphical session."""
+    try:
+        out = subprocess.check_output(
+            [LOGINCTL, "list-sessions", "--no-legend"],
+            text=True, timeout=5)
+        for line in out.strip().split("\n"):
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            session_id = parts[0]
+            try:
+                state = subprocess.check_output(
+                    [LOGINCTL, "show-session", session_id, "-p", "Active", "--value"],
+                    text=True, timeout=5).strip()
+                session_type = subprocess.check_output(
+                    [LOGINCTL, "show-session", session_id, "-p", "Type", "--value"],
+                    text=True, timeout=5).strip()
+                if state != "yes" or session_type not in ("wayland", "x11"):
+                    continue
+                uid = subprocess.check_output(
+                    [LOGINCTL, "show-session", session_id, "-p", "User", "--value"],
+                    text=True, timeout=5).strip()
+                username = subprocess.check_output(
+                    [ID, "-un", uid], text=True, timeout=5).strip()
+                return (uid, username)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def get_power_save_mode(uid, username):
+    """Return the current mutter PowerSaveMode (0=on, 3=off) or None."""
+    bus = f"unix:path=/run/user/{uid}/bus"
+    try:
+        out = subprocess.check_output(
+            [RUNUSER, "-u", username, "--",
+             "env", f"DBUS_SESSION_BUS_ADDRESS={bus}",
+             BUSCTL, "--user", "get-property",
+             "org.gnome.Mutter.DisplayConfig",
+             "/org/gnome/Mutter/DisplayConfig",
+             "org.gnome.Mutter.DisplayConfig",
+             "PowerSaveMode"],
+            text=True, timeout=5, stderr=subprocess.DEVNULL).strip()
+        if out:
+            return int(out.split()[-1])
+    except Exception:
+        pass
+    return None
+
+
+def set_power_save_mode(uid, username, mode):
+    """Set mutter PowerSaveMode (3=blank, 0=on)."""
+    bus = f"unix:path=/run/user/{uid}/bus"
+    try:
+        subprocess.run(
+            [RUNUSER, "-u", username, "--",
+             "env", f"DBUS_SESSION_BUS_ADDRESS={bus}",
+             BUSCTL, "--user", "set-property",
+             "org.gnome.Mutter.DisplayConfig",
+             "/org/gnome/Mutter/DisplayConfig",
+             "org.gnome.Mutter.DisplayConfig",
+             "PowerSaveMode", "i", str(mode)],
+            timeout=5, capture_output=True)
+        log(f"set PowerSaveMode={mode}")
+    except Exception as e:
+        log(f"WARNING: failed to set PowerSaveMode: {e}")
+
+
+def lock_display():
+    """Request logind to lock all sessions (GNOME shows the screen lock)."""
+    try:
+        subprocess.run(["loginctl", "lock-sessions"], timeout=5, capture_output=True)
+        log("requested logind to lock sessions")
+    except Exception as e:
+        log(f"WARNING: failed to lock sessions: {e}")
+
+
+def simulate_user_activity(ui):
+    """Inject a harmless key event to let GNOME wake and force a repaint."""
+    try:
+        ui.write(ecodes.EV_KEY, ecodes.KEY_WAKEUP, 1)
+        ui.syn()
+        time.sleep(0.01)
+        ui.write(ecodes.EV_KEY, ecodes.KEY_WAKEUP, 0)
+        ui.syn()
+    except Exception as e:
+        log(f"WARNING: failed to inject KEY_WAKEUP: {e}")
+
+
+def main():
+    global _ui
+
+    if os.geteuid() != 0:
+        log("FATAL: must run as root (device grab + UInput need it)")
+        sys.exit(1)
+
+    real_dev = None
+    for _ in range(30):
+        real_dev = get_power_device()
+        if real_dev is not None:
+            break
+        time.sleep(1)
+    if real_dev is None:
+        log("FATAL: power-key device not found")
+        sys.exit(1)
+    log(f"found power-key device {real_dev.path} ({real_dev.name})")
+
+    try:
+        real_dev.grab()
+    except Exception as e:
+        log(f"FATAL: cannot grab power-key device: {e}")
+        sys.exit(1)
+    log("grabbed power-key device (GNOME will not see power events)")
+
+    cap = {ecodes.EV_KEY: [ecodes.KEY_WAKEUP]}
+    try:
+        _ui = UInput(cap, name="sheng-power-wakeup", vendor=0x1234, product=0x5678)
+    except Exception as e:
+        log(f"FATAL: cannot create uinput device: {e}")
+        sys.exit(1)
+
+    def shutdown(sig, frame):
+        log("shutting down")
+        if _ui:
+            _ui.close()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+
+    try:
+        for event in real_dev.read_loop():
+            if event.type != ecodes.EV_KEY or event.code != ecodes.KEY_POWER:
+                continue
+            if event.value != 1:
+                continue
+            session = find_active_session()
+            if not session:
+                log("power key pressed but no active session")
+                continue
+            uid, username = session
+            mode = get_power_save_mode(uid, username)
+            log(f"power key pressed, PowerSaveMode={mode}")
+            if mode == 0:
+                set_power_save_mode(uid, username, 3)
+                lock_display()
+            else:
+                simulate_user_activity(_ui)
+                set_power_save_mode(uid, username, 0)
+    except Exception as e:
+        log(f"FATAL: error in event read loop: {e}")
+        if _ui:
+            _ui.close()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

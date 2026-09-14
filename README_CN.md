@@ -1,73 +1,93 @@
-# sheng-tablet-mode
+# sheng-gnome-fix
 
 [English](README.md)
 
-针对小米平板 6S Pro（`sheng`）**GNOME 自动旋转**的确定性虚拟平板模式开关。
+小米平板 6S Pro（`sheng`）的 GNOME 修复集合：确定性的**自动旋转**、把**电源键**
+变成「息屏/亮屏」开关（而不是睡眠），以及在系统层面**彻底禁用 suspend/hibernate**
+（本机 deep 睡眠必然失败：内核在停 CPU 时被 pending 唤醒打断并留下黑屏，无法唤醒）。
 
-出厂 DTB 中物理 `gpio-keys` 霍尔传感器上报 `SW_TABLET_MODE=0`，导致 mutter
-锁定为"笔记本"姿态并永久关闭自动旋转。本仓库提供一个小型
-`fake-tablet-mode` 服务绕过该问题的源码文件：
+统一打成一个与发行版无关的包（noarch RPM 与 `all` DEB）。源码树按 Linux sysroot
+布局组织：每个 daemon 各自目录带一份 `/usr/` 子树，共享配置放 `common/usr/`，
+构建脚本把它们合并进同一个包。
 
-1. udev 规则将物理 `gpio-keys` 开关对 libinput 隐藏；
-2. 虚拟 `uinput` 设备只上报 `SW_TABLET_MODE`；
-3. 仅在真实用户会话启动后把 `SW_TABLET_MODE` 0→1，解锁 mutter 面板方向管理；
-4. 合盖/开盖亮灭屏由 `org.gnome.Mutter.DisplayConfig` `PowerSaveMode` 控制。
+## 功能
 
-## 前置条件
+开机启动两个小型 systemd 服务：
 
-- `iio-sensor-proxy` 服务运行正常：daemon 会先等待其持有 D-Bus 名
-  `net.hadess.SensorProxy`，之后才上报平板模式。
-- `monitor-sensor` 能正确上报加速度计/陀螺仪方向（运行它并旋转设备确认）。
-- 需要 Python 3 及 `python3-evdev`，以及 systemd 与 udev。
+1. **`sheng-fake-tablet-mode`** —— GNOME 自动旋转
+   出厂 DTB 中物理 `gpio-keys` 霍尔传感器上报 `SW_TABLET_MODE=0`，导致 mutter
+   锁定为「笔记本」姿态并永久关闭自动旋转。udev 规则把该开关对 libinput 隐藏，
+   虚拟 `uinput` 设备仅在真实用户会话启动后把 `SW_TABLET_MODE` 0→1，解锁 mutter
+   面板方向管理。合盖/开盖通过 `org.gnome.Mutter.DisplayConfig` `PowerSaveMode`
+   控制息屏/亮屏。
+
+2. **`sheng-power-key-toggle`** —— 电源键只切息屏，绝不睡眠
+   挂起时若有 pending 唤醒会让 deep 睡眠中途 abort（`Wakeup pending. Abort CPU
+   freeze`），屏幕黑死无法唤醒。本服务独占 grab 物理电源键，让 GNOME 永远看不到
+   电源事件，每次按下只切换 `PowerSaveMode` 3↔0（3=息屏，0=亮屏），唤醒时注入
+   `KEY_WAKEUP` 强制屏幕重绘；息屏同时通过 `loginctl lock-sessions` 锁定所有
+   会话，下次亮屏直接落在 GNOME 锁屏界面。
+
+因此 sheng 上「睡眠」永远只是「关背光且锁定屏幕」，suspend/hibernate 被整体禁用：
+
+- `/usr/lib/systemd/sleep.conf.d/10-sheng-no-suspend.conf`：`AllowSuspend=no`、
+  `AllowHibernation=no`、`AllowHybridSleep=no`、`AllowSuspendThenHibernate=no`
+  （GNOME 不再出现「挂起」按钮，也不再自动睡眠）。
+- `/usr/lib/systemd/logind.conf.d/10-sheng-gnome-fix.conf`：在 logind 层忽略
+  电源键与全部合盖事件。
+- GSettings override（`zz-sheng-gnome-fix.gschema.override`）：系统级设置
+  `power-button-action=nothing`、`sleep-inactive-*=nothing`、`idle-dim=false`、
+  `ambient-enabled=false`。
+
+**自动锁屏不受影响**：锁屏由 idle 息屏驱动，与 suspend 无关。idle 超时后屏幕
+熄灭并锁屏，按电源键唤醒回到锁屏界面。
 
 ## 文件
 
-| 文件                           | 安装位置                                      |
-| ------------------------------ | --------------------------------------------- |
-| `fake-tablet-mode`             | `/usr/libexec/fake-tablet-mode`               |
-| `fake-tablet-mode.service`     | systemd 单元，`Before=gdm.service`            |
-| `80-sheng-tablet-mode.rules`   | `/usr/lib/udev/rules.d/`                      |
-| `10-sheng-tablet-mode.conf`    | `/usr/lib/systemd/logind.conf.d/`（`HandleLidSwitch=ignore`） |
-| `sheng-tablet-mode.conf`       | `/usr/lib/modules-load.d/`（加载 `uinput`）   |
+| 源码位置（sysroot）                    | 安装位置                                    |
+| -------------------------------------- | ------------------------------------------- |
+| `sheng-fake-tablet-mode/usr/libexec/`  | `/usr/libexec/sheng-fake-tablet-mode`       |
+| `sheng-power-key-toggle/usr/libexec/`  | `/usr/libexec/sheng-power-key-toggle`       |
+| `sheng-*/usr/lib/systemd/system/`      | `/usr/lib/systemd/system/*.service`         |
+| `common/usr/lib/systemd/system-preset/`| `/usr/lib/systemd/system-preset/50-sheng-gnome-fix.preset` |
+| `common/usr/lib/udev/rules.d/`         | `/usr/lib/udev/rules.d/80-sheng-gnome-fix.rules` |
+| `common/usr/lib/systemd/logind.conf.d/`| `/usr/lib/systemd/logind.conf.d/10-sheng-gnome-fix.conf` |
+| `common/usr/lib/systemd/sleep.conf.d/` | `/usr/lib/systemd/sleep.conf.d/10-sheng-no-suspend.conf` |
+| `common/usr/lib/modules-load.d/`       | `/usr/lib/modules-load.d/sheng-gnome-fix.conf` |
+| `common/usr/share/glib-2.0/schemas/`   | `/usr/share/glib-2.0/schemas/zz-sheng-gnome-fix.gschema.override` |
 
-## 关于
+## 前置条件
 
-一个小型守护程序：向 GNOME 暴露虚拟 `SW_TABLET_MODE`，使小米平板 6S Pro
-（sheng）自动旋转可用。将物理 `gpio-keys` 霍尔传感器对 libinput 隐藏，待
-真实用户会话启动后再上报平板模式，从而解锁 mutter 面板方向管理；合盖/开盖
-通过 mutter D-Bus `PowerSaveMode` 控制息屏/亮屏。
-
-源码与发行版无关（Python 3 + `evdev` + systemd），请自行打包：按上表将文件
-映射到对应发行版的 systemd 与 udev 路径。上游的 NixOS 实现见
-[DotRedstone/nixos-sheng](https://github.com/DotRedstone/nixos-sheng)。
+- Python 3 及 `python3-evdev`，以及 systemd 与 udev。
+- GNOME（daemon 通过每会话 D-Bus `DisplayConfig` 驱动 mutter）。
 
 ## 打包
 
-预编译包以 GitHub Releases 形式发布，无需自行制作或在别处下载：
+预编译包以 GitHub Releases 发布；
+[fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) 的 rootfs 构建在
+**desktop=GNOME** 时直接拉取发布的 RPM：
 
-- `sheng-tablet-mode-1.0.0-1.noarch.rpm` – 不分版本的 noarch RPM（无
-  `%dist` 后缀），任意 Fedora 版本均可安装。
-- `sheng-tablet-mode_1.0.0_all.deb` – Debian/Ubuntu 包
-  （`Depends: python3, python3-evdev`）。
+- `sheng-gnome-fix-1.0.0-1.noarch.rpm` – 不分版本的 noarch RPM（无 `%{dist}`
+  后缀），任意 Fedora 版本均可安装。
+- `sheng-gnome-fix_1.0.0_all.deb` – Debian/Ubuntu 包
+  （`Depends: python3, python3-evdev, glib2.0-bin, systemd`）。
 
 安装：
 
-- Debian/Ubuntu：`sudo dpkg -i sheng-tablet-mode_1.0.0_all.deb`，再用
+- Fedora：`sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.0.0-1.noarch.rpm`
+- Debian/Ubuntu：`sudo dpkg -i sheng-gnome-fix_1.0.0_all.deb`，再用
   `sudo apt-get install -f` 补全依赖。
-- Fedora：`sudo dnf install --nogpgcheck ./sheng-tablet-mode-1.0.0-1.noarch.rpm`
 
-安装完成后需要重启，udev 规则、logind drop-in 与 systemd 单元才会生效。
+装完需重启，udev 规则、systemd drop-in/preset 与两个单元才会生效。若已装过旧的
+`sheng-tablet-mode`，请先卸载（`dnf remove sheng-tablet-mode` /
+`dpkg -r sheng-tablet-mode`）。
 
-如需自行在仓库内构建：
+## 构建
 
-- `./build-rpm.sh` – 在 Fedora 容器/chroot 中运行（需 `rpm-build`），产物
-  输出到当前目录。
-- `./build-deb.sh` – 使用 `dpkg-deb --root-owner-group`，产物输出到当前
-  目录。
-
-[fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) 的 rootfs 构建在
-选择 **desktop=GNOME** 时，直接 fetch 本仓库 Release 中的 RPM，而不再自行
-打包。`sheng-tablet-mode.spec` 就放在本仓库中，由 `build-rpm.sh` 使用。
+- `./build-deb.sh` – 任何有 `dpkg-deb` 的环境皆可（如 Termux），产物输出到
+  当前目录。
+- `./build-rpm.sh` – 在 Fedora 容器/chroot 中运行（需 `rpm-build`），例如设备上
+  的 DroidSpaces Fedora-44 容器或对 Fedora 镜像 `podman run`；产物输出到当前目录。
 
 ## 相关项目
 
@@ -76,6 +96,8 @@
 
 ## 致谢
 
-- **DotRedstone** – 感谢其 [nixos-sheng](https://github.com/DotRedstone/nixos-sheng) 项目，其中的 `fake-tablet-mode` 服务与 `docs/hall-sensor-rotation.md` 调试记录，是本工具在小米平板 6S Pro 上实现 GNOME 自动旋转的基础
+- **DotRedstone** – 感谢其 [nixos-sheng](https://github.com/DotRedstone/nixos-sheng)
+  项目，其中的 `fake-tablet-mode` 与 `sheng-power-key-display-toggle` 服务，是
+  本包的基础。
 
 基于 MIT License，详见 `LICENSE`。

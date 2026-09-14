@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 mumuxiao722 <zy349931@163.com>
-# fake-tablet-mode - expose SW_TABLET_MODE to GNOME deterministically and
+# sheng-fake-tablet-mode - expose SW_TABLET_MODE to GNOME deterministically and
 # control cover blanking via mutter D-Bus PowerSaveMode.
 #
 # Adapted from the NixOS implementation in DotRedstone/nixos-sheng:
@@ -38,7 +38,7 @@ _ui = None
 
 
 def log(msg):
-    print(f"fake-tablet-mode: {msg}", file=sys.stderr, flush=True)
+    print(f"sheng-fake-tablet-mode: {msg}", file=sys.stderr, flush=True)
 
 
 def get_real_lid_device():

@@ -1,0 +1,24 @@
+Package: sheng-gnome-fix
+Version: 1.0.0
+Architecture: all
+Section: utils
+Priority: optional
+Maintainer: mumuxiao722 <zy349931@163.com>
+Depends: python3, python3-evdev, glib2.0-bin, systemd
+Description: GNOME fixes for Xiaomi Pad 6S Pro (sheng)
+ Two small systemd services that make GNOME usable on the tablet:
+  - sheng-fake-tablet-mode exposes SW_TABLET_MODE to mutter deterministically
+    so auto-rotation works (hides the broken gpio-keys hall switch from
+    libinput, reports 0->1 via a virtual uinput device once the user session
+    starts, and blanks/restores the display on cover close/open).
+  - sheng-power-key-toggle grabs the physical power key so GNOME never sees
+    it as a suspend/wake request, and turns each press into a PowerSaveMode
+    3<->0 toggle (3 = display off, 0 = on), forcing a repaint on wake and
+    locking every session via loginctl so wake lands on the screen lock.
+ Suspend/hibernate is disabled system-wide (sleep.conf.d AllowSuspend=no,
+ logind ignores power/lid events, GSettings power-button-action=nothing),
+ because deep sleep cannot be woken on this device: a pending wakeup aborts
+ the CPU freeze and leaves a black, unresponsive screen.
+ .
+ GNOME-only support package. Sources:
+ https://github.com/mumuxiao722/sheng-gnome-fix

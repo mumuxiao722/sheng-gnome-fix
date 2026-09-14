@@ -1,85 +1,104 @@
-# sheng-tablet-mode
+# sheng-gnome-fix
 
 [中文](README_CN.md)
 
-Deterministic virtual tablet-mode switch for **GNOME auto-rotation** on the
-Xiaomi Pad 6S Pro (`sheng`).
+GNOME fixes for the Xiaomi Pad 6S Pro (`sheng`): deterministic **auto-rotation**,
+a **power key** that blanks/restores the display instead of suspending, and
+system-wide removal of suspend/hibernate (deep sleep cannot be woken on this
+device - the kernel aborts it and leaves a black screen).
 
-The physical `gpio-keys` hall sensor reports `SW_TABLET_MODE=0` in the shipped
-DTB, which makes mutter lock into "laptop" posture and permanently disable
-auto-rotation. This repository provides the source files for a small
-`fake-tablet-mode` service that works around that:
+Everything is packaged as one distro-agnostic package (noarch RPM and `all`
+DEB). The source tree follows the Linux sysroot layout: each daemon lives in
+its own `/<daemon>/usr/` subtree, shared configuration lives in
+`common/usr/`, and the build scripts merge them into a single package.
 
-1. a udev rule hides the physical `gpio-keys` switch from libinput,
-2. a virtual `uinput` device reports only `SW_TABLET_MODE`,
-3. it flips `SW_TABLET_MODE` 0→1 only after the real user session starts,
-   which unlocks mutter's panel-orientation management,
-4. cover close/open blanking is controlled via
-   `org.gnome.Mutter.DisplayConfig` `PowerSaveMode`.
+## What it does
 
-## Prerequisites
+Two small systemd services run at boot:
 
-- `iio-sensor-proxy` service running normally: the daemon waits for it to
-  own the D-Bus name `net.hadess.SensorProxy` before reporting tablet mode.
-- `monitor-sensor` reports accelerometer/gyro orientation correctly (run it
-  and rotate the device to confirm).
-- Python 3 with `python3-evdev`, plus systemd and udev.
+1. **`sheng-fake-tablet-mode`** - GNOME auto-rotation
+   The physical `gpio-keys` hall sensor reports `SW_TABLET_MODE=0` in the
+   shipped DTB, which makes mutter lock into "laptop" posture and permanently
+   disable auto-rotation. A udev rule hides that switch from libinput, and a
+   virtual `uinput` device reports `SW_TABLET_MODE` 0->1 only after the real
+   user session starts, unlocking mutter panel-orientation management. Cover
+   close/open blanks via `org.gnome.Mutter.DisplayConfig` `PowerSaveMode`.
+
+2. **`sheng-power-key-toggle`** - power key = display toggle, never sleep
+   A wakeup pending during the suspend CPU-freeze aborts deep sleep and leaves
+   a black, unresponsive screen (`Wakeup pending. Abort CPU freeze`). This
+   service exclusively grabs the physical power key so GNOME never sees it as
+   a suspend/wake request, and turns each press into a
+`PowerSaveMode` 3<->0 toggle (3 = display off, 0 = on), injecting a
+  `KEY_WAKEUP` event on wake to force a screen repaint. Blanking also locks
+  every session via `loginctl lock-sessions`, so the next wake lands on the
+  GNOME screen lock.
+
+So "sleep" on sheng only ever means "display off, session locked". Suspend/hibernate is disabled
+entirely:
+
+- `/usr/lib/systemd/sleep.conf.d/10-sheng-no-suspend.conf` - `AllowSuspend=no`,
+  `AllowHibernation=no`, `AllowHybridSleep=no`, `AllowSuspendThenHibernate=no`
+  (no GNOME "Suspend" button, no auto-sleep).
+- `/usr/lib/systemd/logind.conf.d/10-sheng-gnome-fix.conf` - ignores the power
+  key and all lid-switch events at the logind level.
+- GSettings override (`zz-sheng-gnome-fix.gschema.override`) - sets
+  `power-button-action=nothing`, `sleep-inactive-*=nothing`, `idle-dim=false`,
+  `ambient-enabled=false` system-wide.
+
+Auto screen **locking still works**: it is driven by idle blanking, independent
+of suspend. After the idle delay the screen blanks and locks; the power key
+wakes it back to the lock screen.
 
 ## Files
 
-| File                        | Installed to                                  |
-| --------------------------- | --------------------------------------------- |
-| `fake-tablet-mode`          | `/usr/libexec/fake-tablet-mode`               |
-| `fake-tablet-mode.service`  | systemd unit, `Before=gdm.service`            |
-| `80-sheng-tablet-mode.rules`| `/usr/lib/udev/rules.d/`                      |
-| `10-sheng-tablet-mode.conf` | `/usr/lib/systemd/logind.conf.d/` (`HandleLidSwitch=ignore`) |
-| `sheng-tablet-mode.conf`    | `/usr/lib/modules-load.d/` (loads `uinput`)   |
+| Source (sysroot)                       | Installed to                                  |
+| -------------------------------------- | --------------------------------------------- |
+| `sheng-fake-tablet-mode/usr/libexec/`  | `/usr/libexec/sheng-fake-tablet-mode`         |
+| `sheng-power-key-toggle/usr/libexec/`  | `/usr/libexec/sheng-power-key-toggle`         |
+| `sheng-*/usr/lib/systemd/system/`      | `/usr/lib/systemd/system/*.service`           |
+| `common/usr/lib/systemd/system-preset/`| `/usr/lib/systemd/system-preset/50-sheng-gnome-fix.preset` |
+| `common/usr/lib/udev/rules.d/`         | `/usr/lib/udev/rules.d/80-sheng-gnome-fix.rules` |
+| `common/usr/lib/systemd/logind.conf.d/`| `/usr/lib/systemd/logind.conf.d/10-sheng-gnome-fix.conf` |
+| `common/usr/lib/systemd/sleep.conf.d/` | `/usr/lib/systemd/sleep.conf.d/10-sheng-no-suspend.conf` |
+| `common/usr/lib/modules-load.d/`       | `/usr/lib/modules-load.d/sheng-gnome-fix.conf` |
+| `common/usr/share/glib-2.0/schemas/`   | `/usr/share/glib-2.0/schemas/zz-sheng-gnome-fix.gschema.override` |
 
-## About
+## Prerequisites
 
-A small daemon that exposes a virtual `SW_TABLET_MODE` switch to GNOME so
-auto-rotation works on the Xiaomi Pad 6S Pro (sheng). The physical `gpio-keys`
-hall sensor is hidden from libinput and a `uinput` device reports tablet mode
-once the real user session starts, unlocking mutter panel-orientation
-management. Cover close/open blanks the screen via the mutter D-Bus
-`PowerSaveMode` property.
-
-The sources are distro-agnostic (Python 3 + `evdev` + systemd). Package them
-for your distribution: map the files from the table above to your distro's
-systemd and udev paths. The upstream implementation is NixOS, see
-[DotRedstone/nixos-sheng](https://github.com/DotRedstone/nixos-sheng).
+- Python 3 with `python3-evdev`, plus systemd and udev.
+- GNOME (the daemons drive mutter via its per-session D-Bus `DisplayConfig`).
 
 ## Packaging
 
-Prebuilt packages are published as GitHub Releases, so there is no need to
-build or download from elsewhere:
+Prebuilt packages are published as GitHub Releases; the Fedora rootfs build in
+[fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) fetches the
+released RPM when built with **desktop=GNOME**:
 
-- `sheng-tablet-mode-1.0.0-1.noarch.rpm` – version-independent noarch RPM
-  (no `%{dist}`), installs on any Fedora release.
-- `sheng-tablet-mode_1.0.0_all.deb` – Debian/Ubuntu package
-  (`Depends: python3, python3-evdev`).
+- `sheng-gnome-fix-1.0.0-1.noarch.rpm` – version-independent noarch RPM (no
+  `%{dist}`), installs on any Fedora release.
+- `sheng-gnome-fix_1.0.0_all.deb` – Debian/Ubuntu package
+  (`Depends: python3, python3-evdev, glib2.0-bin, systemd`).
 
 Install:
 
-- Debian/Ubuntu: `sudo dpkg -i sheng-tablet-mode_1.0.0_all.deb`, then
+- Fedora: `sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.0.0-1.noarch.rpm`
+- Debian/Ubuntu: `sudo dpkg -i sheng-gnome-fix_1.0.0_all.deb`, then
   `sudo apt-get install -f` to fill in dependencies.
-- Fedora: `sudo dnf install --nogpgcheck ./sheng-tablet-mode-1.0.0-1.noarch.rpm`
 
-A reboot is required after installing for the udev rule, the logind
-drop-in, and the systemd unit to take effect.
+A reboot is required after installing for the udev rule, the systemd
+drop-ins/preset and the two units to take effect. If you previously installed
+`sheng-tablet-mode`, remove it first (`dnf remove sheng-tablet-mode` /
+`dpkg -r sheng-tablet-mode`).
 
-To build them yourself from this repo:
+## Building
 
-- `./build-rpm.sh` – run inside a Fedora container/chroot (needs `rpm-build`);
-  outputs the RPM in the current directory.
-- `./build-deb.sh` – uses `dpkg-deb --root-owner-group`; outputs the `.deb` in
-  the current directory.
-
-The Fedora rootfs build in
-[fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) fetches the
-released RPM when the rootfs is built with **desktop=GNOME**, instead of
-building the package itself. `sheng-tablet-mode.spec` lives in this
-repository and is used by `build-rpm.sh`.
+- `./build-deb.sh` – runs anywhere `dpkg-deb` is available (e.g. Termux);
+  outputs the `.deb` in the current directory.
+- `./build-rpm.sh` – run inside a Fedora container/chroot (needs
+  `rpm-build`), e.g. the DroidSpaces Fedora-44 container on the device or a
+  `podman run` against a Fedora image; outputs the RPM in the current
+  directory.
 
 ## Related Projects
 
@@ -88,6 +107,8 @@ repository and is used by `build-rpm.sh`.
 
 ## Credits
 
-- **DotRedstone** – for the [nixos-sheng](https://github.com/DotRedstone/nixos-sheng) project, whose `fake-tablet-mode` service and `docs/hall-sensor-rotation.md` debugging notes form the basis of this package
+- **DotRedstone** – for the [nixos-sheng](https://github.com/DotRedstone/nixos-sheng)
+  project, whose `fake-tablet-mode` and `sheng-power-key-display-toggle`
+  services form the basis of this package.
 
 Licensed under the MIT License. See `LICENSE`.

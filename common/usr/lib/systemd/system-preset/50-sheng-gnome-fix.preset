@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 mumuxiao722 <zy349931@163.com>
+#
+# Ensure `systemctl preset` (used by %systemd_post / image tooling) enables
+# both services regardless of the distribution default policy.
+enable sheng-fake-tablet-mode.service
+enable sheng-power-key-toggle.service

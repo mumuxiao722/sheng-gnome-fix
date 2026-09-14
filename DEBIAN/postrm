@@ -6,7 +6,7 @@ set -e
 udevadm control --reload-rules 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
-    systemctl stop fake-tablet-mode.service >/dev/null 2>&1 || true
+    systemctl stop sheng-fake-tablet-mode.service sheng-power-key-toggle.service >/dev/null 2>&1 || true
 fi
 
 exit 0

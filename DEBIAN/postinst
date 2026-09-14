@@ -7,6 +7,7 @@ set -e
 # rule is installed into the image so the runtime path is covered on boot.
 udevadm control --reload-rules 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
-systemctl enable fake-tablet-mode.service >/dev/null 2>&1 || true
+systemctl preset sheng-fake-tablet-mode.service sheng-power-key-toggle.service >/dev/null 2>&1 || \
+	systemctl enable sheng-fake-tablet-mode.service sheng-power-key-toggle.service >/dev/null 2>&1 || true
 
 exit 0

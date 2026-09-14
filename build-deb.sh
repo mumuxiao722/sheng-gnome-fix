@@ -3,32 +3,39 @@
 # SPDX-License-Identifier: MIT
 #
 # Build the .deb package and place the artifact at the repo top level
-# (sheng-tablet-mode_1.0.0_all.deb). Uses dpkg-deb (--root-owner-group).
+# (sheng-gnome-fix_1.0.0_all.deb). Uses dpkg-deb (--root-owner-group).
+#
+# The source tree follows the Linux sysroot layout. Each daemon lives in its
+# own directory with a /usr/ subtree; shared configs live in common/usr/.
+# They are merged into one package root and packaged together.
 set -e
 umask 022
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$HERE"
-STAGE="$HERE/deb/root"
+STAGE="$REPO_ROOT/deb/root"
 
 rm -rf "$STAGE"
+mkdir -p "$STAGE/usr"
 
-install -D -m 755 "$REPO_ROOT/fake-tablet-mode" "$STAGE/usr/libexec/fake-tablet-mode"
+cp -a "$REPO_ROOT/sheng-fake-tablet-mode/usr/." "$STAGE/usr/"
+cp -a "$REPO_ROOT/sheng-power-key-toggle/usr/." "$STAGE/usr/"
+cp -a "$REPO_ROOT/common/usr/." "$STAGE/usr/"
 
-install -D -m 644 "$REPO_ROOT/fake-tablet-mode.service" "$STAGE/lib/systemd/system/fake-tablet-mode.service"
-install -D -m 644 "$REPO_ROOT/80-sheng-tablet-mode.rules" "$STAGE/lib/udev/rules.d/80-sheng-tablet-mode.rules"
-install -D -m 644 "$REPO_ROOT/10-sheng-tablet-mode.conf" "$STAGE/lib/systemd/logind.conf.d/10-sheng-tablet-mode.conf"
-install -D -m 644 "$REPO_ROOT/sheng-tablet-mode.conf" "$STAGE/usr/lib/modules-load.d/sheng-tablet-mode.conf"
+find "$STAGE/usr" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+find "$STAGE/usr" -type f -exec chmod 644 {} +
+find "$STAGE/usr" -type d -exec chmod 755 {} +
+chmod 755 "$STAGE/usr/libexec/sheng-fake-tablet-mode" "$STAGE/usr/libexec/sheng-power-key-toggle"
 
 mkdir -p "$STAGE/DEBIAN"
-cp "$REPO_ROOT/deb/DEBIAN/control" "$REPO_ROOT/deb/DEBIAN/postinst" \
-   "$REPO_ROOT/deb/DEBIAN/prerm" "$REPO_ROOT/deb/DEBIAN/postrm" \
+cp "$REPO_ROOT/DEBIAN/control" "$REPO_ROOT/DEBIAN/postinst" \
+   "$REPO_ROOT/DEBIAN/prerm" "$REPO_ROOT/DEBIAN/postrm" \
    "$STAGE/DEBIAN/"
 chmod 755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm" "$STAGE/DEBIAN/postrm"
 
-dpkg-deb --build --root-owner-group "$STAGE" "$REPO_ROOT/sheng-tablet-mode_1.0.0_all.deb"
+dpkg-deb --build --root-owner-group "$STAGE" "$REPO_ROOT/sheng-gnome-fix_1.0.0_all.deb"
 
 rm -rf "$STAGE"
 
-echo "=== sheng-tablet-mode DEB build complete ==="
-ls -la "$REPO_ROOT"/sheng-tablet-mode_1.0.0_all.deb
+echo "=== sheng-gnome-fix DEB build complete ==="
+ls -la "$REPO_ROOT"/sheng-gnome-fix_1.0.0_all.deb

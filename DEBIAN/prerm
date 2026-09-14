@@ -4,7 +4,7 @@
 set -e
 
 if [ "$1" = "remove" ] || [ "$1" = "upgrade" ]; then
-    systemctl disable fake-tablet-mode.service >/dev/null 2>&1 || true
+    systemctl disable sheng-fake-tablet-mode.service sheng-power-key-toggle.service >/dev/null 2>&1 || true
 fi
 
 exit 0

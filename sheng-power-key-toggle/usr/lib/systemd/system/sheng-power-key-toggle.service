@@ -1,0 +1,16 @@
+# Blank/restore the display with the power key instead of suspending. Start
+# after the display manager: the service grabs the power key and creates the
+# uinput wakeup device that GNOME needs to repaint on wake.
+[Unit]
+Description=Power-key display toggle for GNOME (Xiaomi Pad 6S Pro)
+After=display-manager.service
+After=systemd-modules-load.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/sheng-power-key-toggle
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

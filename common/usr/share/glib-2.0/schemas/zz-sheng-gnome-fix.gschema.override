@@ -1,0 +1,10 @@
+# System-wide GNOME power defaults for the Xiaomi Pad 6S Pro (sheng).
+# The power key serves as a display toggle (sheng-power-key-display-toggle),
+# so the GNOME power plugin must not act on it; auto-suspend is disabled
+# because deep sleep cannot be woken on this device.
+[org.gnome.settings-daemon.plugins.power]
+power-button-action='nothing'
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'
+idle-dim=false
+ambient-enabled=false
