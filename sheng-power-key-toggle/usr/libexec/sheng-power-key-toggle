@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-2.0-only
 # Copyright (c) 2026 mumuxiao722 <zy349931@163.com>
 # sheng-power-key-toggle - blank/restore the display with the power
 # key on the Xiaomi Pad 6S Pro (sheng) instead of suspending.

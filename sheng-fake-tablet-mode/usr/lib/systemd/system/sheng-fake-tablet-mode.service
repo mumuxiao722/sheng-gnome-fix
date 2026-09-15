@@ -3,12 +3,13 @@
 Description=Fake tablet-mode switch for GNOME auto-rotation (Xiaomi Pad 6S Pro)
 After=systemd-modules-load.service
 Before=gdm.service
+ConditionPathExists=/dev/uinput
 
 [Service]
 Type=simple
 ExecStart=/usr/libexec/sheng-fake-tablet-mode
-Restart=always
-RestartSec=3
+Restart=on-failure
+RestartSec=1s
 
 [Install]
 WantedBy=multi-user.target

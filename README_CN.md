@@ -17,9 +17,12 @@
 1. **`sheng-fake-tablet-mode`** —— GNOME 自动旋转
    出厂 DTB 中物理 `gpio-keys` 霍尔传感器上报 `SW_TABLET_MODE=0`，导致 mutter
    锁定为「笔记本」姿态并永久关闭自动旋转。udev 规则把该开关对 libinput 隐藏，
-   虚拟 `uinput` 设备仅在真实用户会话启动后把 `SW_TABLET_MODE` 0→1，解锁 mutter
-   面板方向管理。合盖/开盖通过 `org.gnome.Mutter.DisplayConfig` `PowerSaveMode`
-   控制息屏/亮屏。
+   改由虚拟 `uinput` 设备上报 `SW_TABLET_MODE`。设备启动即处于笔记本态（OFF），
+   之后每 200ms 扫描 `/proc` 寻找**用户**的 `gnome-shell`（通过 uid 范围与
+   `--mode=gdm` 排除 GDM 登录界面），连续 25 个 tick（约 5 秒）后才将开关 0→1，
+   解锁 mutter 面板方向管理；shell 退出时开关立即回落 OFF，因此会话重启总能产生
+   一次新的 0→1 边沿。合盖/开盖通过 `org.gnome.Mutter.DisplayConfig`
+   `PowerSaveMode` 控制息屏/亮屏。核心服务已被新实现替代，开盖盒盖仍然沿用旧实现。
 
 2. **`sheng-power-key-toggle`** —— 电源键只切息屏，绝不睡眠
    挂起时若有 pending 唤醒会让 deep 睡眠中途 abort（`Wakeup pending. Abort CPU
@@ -91,13 +94,18 @@
 
 ## 相关项目
 
-- [DotRedstone/nixos-sheng](https://github.com/DotRedstone/nixos-sheng) – 上游的 NixOS 实现
+- [DotRedstone/nixos-sheng](https://github.com/DotRedstone/nixos-sheng) – 本包合盖息屏与电源键切换所参照的 NixOS 实现
 - [fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) – 使用本仓库发布的 RPM 的 Fedora 平板 rootfs 项目
+- [CFM880/nabu-accelerometer](https://github.com/CFM880/nabu-accelerometer) – `sheng-fake-tablet-mode` 的 tablet-mode 核心移植来源
 
 ## 致谢
 
 - **DotRedstone** – 感谢其 [nixos-sheng](https://github.com/DotRedstone/nixos-sheng)
-  项目，其中的 `fake-tablet-mode` 与 `sheng-power-key-display-toggle` 服务，是
-  本包的基础。
+  项目：原 `fake-tablet-mode` 与 `sheng-power-key-display-toggle` 服务是本包的基础。
+  新的 `sheng-fake-tablet-mode` 用于替换其原有的 `fake-tablet-mode`，合盖/开盖息屏
+  仍沿用其实现。
+- **CFM880** – `sheng-fake-tablet-mode` 的桌面上报核心忠实移植自
+  [nabu-accelerometer](https://github.com/CFM880/nabu-accelerometer) 的
+  `userspace/nabu-tablet-mode.c`。
 
-基于 MIT License，详见 `LICENSE`。
+本包按 GPL-2.0-only 发布，详见 `LICENSE`。

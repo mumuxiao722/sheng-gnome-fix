@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2026 mumuxiao722
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Build the .deb package and place the artifact at the repo top level
 # (sheng-gnome-fix_1.0.0_all.deb). Uses dpkg-deb (--root-owner-group).

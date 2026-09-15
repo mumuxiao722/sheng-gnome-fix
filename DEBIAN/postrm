@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (c) 2026 mumuxiao722
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-2.0-only
 set -e
 
 udevadm control --reload-rules 2>/dev/null || true

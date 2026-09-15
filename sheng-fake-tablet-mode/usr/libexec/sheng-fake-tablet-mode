@@ -1,40 +1,60 @@
 #!/usr/bin/python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-2.0-only
 # Copyright (c) 2026 mumuxiao722 <zy349931@163.com>
 # sheng-fake-tablet-mode - expose SW_TABLET_MODE to GNOME deterministically and
 # control cover blanking via mutter D-Bus PowerSaveMode.
 #
-# Adapted from the NixOS implementation in DotRedstone/nixos-sheng:
-#   nixos/hardware/xiaomi-sheng/sensors/default.nix  (systemd.services.fake-tablet-mode)
-#   docs/hall-sensor-rotation.md
-#
-# Rationale: mutter keys auto-rotation to touch-mode. With the physical
-# gpio-keys hall sensor present AND SW_TABLET_MODE=0, mutter locks into
-# "laptop" posture and permanently disables auto-rotation. This service:
+# Tablet-mode core (NEW implementation):
+# Faithful port of userspace/nabu-tablet-mode.c from CFM880/nabu-accelerometer
+# (SPDX GPL-2.0-only). This replaces the original one-shot fake-tablet-mode
+# service from DotRedstone/nixos-sheng. Rationale, kept from the original:
+# mutter keys auto-rotation to touch-mode. With the physical gpio-keys hall
+# sensor present AND SW_TABLET_MODE=0, mutter locks into "laptop" posture and
+# permanently disables auto-rotation. This service:
 #   1. hides the physical gpio-keys switch from libinput (udev rule), then
 #   2. creates a virtual input device reporting ONLY SW_TABLET_MODE, and
 #   3. reports SW_TABLET_MODE=1 only AFTER the real graphical user session
 #      starts (explicit 0->1 transition), which unlocks mutter auto-rotation.
-# Cover close/open blanking is handled here via org.gnome.Mutter.DisplayConfig
-# PowerSaveMode (3 = blank, 0 = on).
+# The device starts in laptop mode (OFF): Mutter gives native-portrait panels
+# one initial accelerometer update before applying tablet-mode policy.
+# Advertising ON before that update makes Mutter inhibit the sensor
+# immediately afterwards.
+# A 200 ms poll loop watches /proc for the *user's* gnome-shell (GDM's
+# gnome-shell is excluded via uid range and --mode=gdm) and reports ON after
+# 25 consecutive ticks. When the shell exits the switch returns to OFF, so a
+# restart of the graphical session always produces a fresh OFF -> ON edge.
+#
+# Cover open/close handling (OLD implementation, kept): blank the display on
+# close via PowerSaveMode=3, wake and unblank on open via KEY_WAKEUP +
+# PowerSaveMode=0. Still follows the original fake-tablet-mode service from
+# DotRedstone/nixos-sheng:
+#   nixos/hardware/xiaomi-sheng/sensors/default.nix  (systemd.services.fake-tablet-mode)
+#   docs/hall-sensor-rotation.md
 
-import evdev
+import os
+import signal
 import subprocess
 import sys
-import time
-import signal
-import os
 import threading
+import time
 
-from evdev import ecodes, UInput
+import evdev
+from evdev import UInput, ecodes
 
 LOGINCTL = "/usr/bin/loginctl"
 BUSCTL = "/usr/bin/busctl"
 RUNUSER = "/usr/sbin/runuser"
 ID = "/usr/bin/id"
 
-# Keep a global reference so the UInput device survives garbage collection.
+POLL_SEC = 0.2
+USER_SHELL_DELAY_TICKS = 25
+UINPUT_MIN_UID = 1000
+NOBODY_UID = 65534
+GDM_CMD_ARG = b"--mode=gdm"
+SHELL_COMM = b"gnome-shell"
+
 _ui = None
+_stopping = False
 
 
 def log(msg):
@@ -111,76 +131,44 @@ def set_power_save_mode(uid, username, mode):
         log(f"WARNING: failed to set PowerSaveMode: {e}")
 
 
-def wait_for_sensor_proxy():
-    while True:
-        try:
-            subprocess.check_call(
-                [BUSCTL, "status", "net.hadess.SensorProxy"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return
-        except Exception:
-            time.sleep(2)
-
-
-def toggle_tablet_mode(ui):
-    """Background thread: after session + sensor are up, do the 0->1 jump."""
-    log("waiting for iio-sensor-proxy to own D-Bus name...")
-    wait_for_sensor_proxy()
-    log("waiting for active user session...")
-    while find_active_session(user_only=True) is None:
-        time.sleep(2)
-    log("session+sensor ready, waiting 5s for Mutter/libinput init...")
-    time.sleep(5)
-    ui.write(ecodes.EV_SW, ecodes.SW_TABLET_MODE, 1)
-    ui.syn()
-    log("toggled SW_TABLET_MODE=1")
-
-
-def main():
-    global _ui
-
-    real_dev = None
-    for _ in range(30):
-        real_dev = get_real_lid_device()
-        if real_dev is not None:
-            break
-        time.sleep(1)
-    if real_dev is None:
-        log("FATAL: real gpio-keys lid device not found")
-        sys.exit(1)
-    log(f"found real lid device at {real_dev.path}")
-
-    if os.geteuid() != 0:
-        log("FATAL: must run as root (UInput needs it)")
-        sys.exit(1)
-
-    cap = {
-        ecodes.EV_SW: [ecodes.SW_TABLET_MODE],
-        ecodes.EV_KEY: [ecodes.KEY_WAKEUP],
-    }
-    try:
-        _ui = UInput(cap, name="Fake Tablet Mode Switch",
-                     vendor=0x1234, product=0x5678)
-    except Exception as e:
-        log(f"FATAL: cannot create uinput device: {e}")
-        sys.exit(1)
-
-    _ui.write(ecodes.EV_SW, ecodes.SW_TABLET_MODE, 0)
+def set_tablet_mode(enabled):
+    _ui.write(ecodes.EV_SW, ecodes.SW_TABLET_MODE, 1 if enabled else 0)
     _ui.syn()
-    log("initialized SW_TABLET_MODE=0 (no lid exposed)")
 
-    def shutdown(sig, frame):
-        log("shutting down")
-        if _ui:
-            _ui.close()
-        sys.exit(0)
 
-    signal.signal(signal.SIGTERM, shutdown)
-    signal.signal(signal.SIGINT, shutdown)
+def graphical_user_shell_running():
+    """True when a gnome-shell owned by a real user (not the GDM greeter) is
+    running. Faithful port of the /proc scan in nabu-tablet-mode.c."""
+    try:
+        iterator = os.scandir("/proc")
+    except OSError:
+        return False
+    with iterator:
+        for entry in iterator:
+            if not entry.name.isdigit():
+                continue
+            try:
+                st = entry.stat()
+                with open(f"/proc/{entry.name}/comm", "rb") as f:
+                    comm = f.read().strip()
+            except (FileNotFoundError, PermissionError):
+                continue
+            if st.st_uid < UINPUT_MIN_UID or st.st_uid == NOBODY_UID:
+                continue
+            if comm != SHELL_COMM:
+                continue
+            try:
+                with open(f"/proc/{entry.name}/cmdline", "rb") as f:
+                    cmdline = f.read()
+            except (FileNotFoundError, PermissionError):
+                continue
+            if GDM_CMD_ARG in cmdline:
+                continue
+            return True
+    return False
 
-    t = threading.Thread(target=toggle_tablet_mode, args=(_ui,), daemon=True)
-    t.start()
 
+def lid_event_loop(real_dev):
     try:
         for event in real_dev.read_loop():
             if event.type == ecodes.EV_SW and event.code == ecodes.SW_LID:
@@ -202,9 +190,76 @@ def main():
                 else:
                     log(f"lid event={event.value} but no active session")
     except Exception as e:
-        log(f"FATAL: error in event read loop: {e}")
+        log(f"FATAL: error in lid event loop: {e}")
         _ui.close()
+        os._exit(1)
+
+
+def handle_signal(_signum, _frame):
+    global _stopping
+    _stopping = True
+
+
+def main():
+    global _ui
+
+    if os.geteuid() != 0:
+        log("FATAL: must run as root (UInput needs it)")
         sys.exit(1)
+
+    real_dev = None
+    for _ in range(30):
+        real_dev = get_real_lid_device()
+        if real_dev is not None:
+            break
+        time.sleep(1)
+    if real_dev is None:
+        log("FATAL: real gpio-keys lid device not found")
+        sys.exit(1)
+    log(f"found real lid device at {real_dev.path}")
+
+    cap = {
+        ecodes.EV_SW: [ecodes.SW_TABLET_MODE],
+        ecodes.EV_KEY: [ecodes.KEY_WAKEUP],
+    }
+    try:
+        _ui = UInput(cap, name="Fake Tablet Mode Switch",
+                     vendor=0x1234, product=0x5678)
+    except Exception as e:
+        log(f"FATAL: cannot create uinput device: {e}")
+        sys.exit(1)
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
+    set_tablet_mode(False)
+    log("SW_TABLET_MODE=OFF; waiting for a graphical user shell")
+
+    threading.Thread(target=lid_event_loop, args=(real_dev,),
+                     daemon=True).start()
+
+    shell_ticks = 0
+    enabled = False
+    try:
+        while not _stopping:
+            if graphical_user_shell_running():
+                if shell_ticks < USER_SHELL_DELAY_TICKS:
+                    shell_ticks += 1
+                if not enabled and shell_ticks == USER_SHELL_DELAY_TICKS:
+                    set_tablet_mode(True)
+                    enabled = True
+                    log("SW_TABLET_MODE=ON")
+            else:
+                shell_ticks = 0
+                if enabled:
+                    set_tablet_mode(False)
+                    enabled = False
+                    log("SW_TABLET_MODE=OFF; graphical user shell exited")
+            time.sleep(POLL_SEC)
+    finally:
+        if enabled:
+            set_tablet_mode(False)
+        _ui.close()
 
 
 if __name__ == "__main__":

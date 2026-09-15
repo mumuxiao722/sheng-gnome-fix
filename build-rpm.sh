@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2026 mumuxiao722
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Build the version-independent noarch RPM and place the artifact at the repo
 # top level (sheng-gnome-fix-1.0.0-1.noarch.rpm). Run inside a Fedora

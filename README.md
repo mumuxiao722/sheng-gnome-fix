@@ -20,9 +20,15 @@ Two small systemd services run at boot:
    The physical `gpio-keys` hall sensor reports `SW_TABLET_MODE=0` in the
    shipped DTB, which makes mutter lock into "laptop" posture and permanently
    disable auto-rotation. A udev rule hides that switch from libinput, and a
-   virtual `uinput` device reports `SW_TABLET_MODE` 0->1 only after the real
-   user session starts, unlocking mutter panel-orientation management. Cover
-   close/open blanks via `org.gnome.Mutter.DisplayConfig` `PowerSaveMode`.
+   virtual `uinput` device reports `SW_TABLET_MODE` instead. The device starts
+   in laptop mode (OFF); every 200 ms the daemon scans `/proc` for the
+   *user's* `gnome-shell` (the GDM greeter's shell is excluded via uid range
+   and `--mode=gdm`) and, after 25 consecutive ticks (~5 s), flips the switch
+   0->1 to unlock mutter panel-orientation management. When the shell exits
+   the switch drops back to OFF, so any session restore produces a fresh 0->1
+   edge. Cover close/open blanks via `org.gnome.Mutter.DisplayConfig`
+   `PowerSaveMode`. The core service has been replaced by a new implementation;
+   lid open/close still uses the old one.
 
 2. **`sheng-power-key-toggle`** - power key = display toggle, never sleep
    A wakeup pending during the suspend CPU-freeze aborts deep sleep and leaves
@@ -102,13 +108,21 @@ drop-ins/preset and the two units to take effect. If you previously installed
 
 ## Related Projects
 
-- [DotRedstone/nixos-sheng](https://github.com/DotRedstone/nixos-sheng) – Original NixOS implementation (upstream)
+- [DotRedstone/nixos-sheng](https://github.com/DotRedstone/nixos-sheng) – NixOS implementation this package's cover-blanking and power-key handling are adapted from
 - [fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) – Fedora tablet-mode rootfs that consumes the released RPM
+- [CFM880/nabu-accelerometer](https://github.com/CFM880/nabu-accelerometer) – source of the tablet-mode core ported into `sheng-fake-tablet-mode`
 
 ## Credits
 
-- **DotRedstone** – for the [nixos-sheng](https://github.com/DotRedstone/nixos-sheng)
-  project, whose `fake-tablet-mode` and `sheng-power-key-display-toggle`
-  services form the basis of this package.
+- **DotRedstone** – the original `fake-tablet-mode` and
+  `sheng-power-key-display-toggle` services in
+  [nixos-sheng](https://github.com/DotRedstone/nixos-sheng) form the basis of
+  this package. The new `sheng-fake-tablet-mode` daemon replaces the original
+  `fake-tablet-mode`; its cover open/close blanking is still adapted from that
+  project.
+- **CFM880** – the desktop-reporting core of `sheng-fake-tablet-mode` is a
+  faithful port of
+  [nabu-accelerometer](https://github.com/CFM880/nabu-accelerometer)`s
+  `userspace/nabu-tablet-mode.c`.
 
-Licensed under the MIT License. See `LICENSE`.
+Licensed under GPL-2.0-only. See `LICENSE`.

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 mumuxiao722 <zy349931@163.com>
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Version-independent noarch RPM (no %%{dist}): installs on any Fedora
 # release. Built from this repository by build-rpm.sh; published as a
@@ -23,7 +23,7 @@ Version:        1.0.0
 Release:        1
 Summary:        GNOME sleep/display/toggle fixes for the Xiaomi Pad 6S Pro (sheng)
 
-License:        MIT
+License:        GPL-2.0-only
 URL:            https://github.com/mumuxiao722/sheng-gnome-fix
 Source0:        %{name}-%{version}.tar.gz
 
