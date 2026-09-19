@@ -21,7 +21,7 @@ mkdir -p "$TOP"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 cp "$REPO_ROOT/sheng-gnome-fix.spec" "$TOP/SPECS/"
 
 cd "$REPO_ROOT"
-tar -czf "$TOP/SOURCES/sheng-gnome-fix-1.0.0.tar.gz" \
+tar -czf "$TOP/SOURCES/sheng-gnome-fix-1.1.tar.gz" \
     --exclude=.git \
     --exclude=DEBIAN \
     --exclude=sheng-gnome-fix.spec \

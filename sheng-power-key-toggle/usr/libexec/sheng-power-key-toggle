@@ -37,6 +37,7 @@ LOGINCTL = "/usr/bin/loginctl"
 BUSCTL = "/usr/bin/busctl"
 RUNUSER = "/usr/sbin/runuser"
 ID = "/usr/bin/id"
+POWER_PROFILE_FILE = "/run/sheng-power-profile"
 
 # evdev device name of the PMIC power key on sheng ("pmic_pwrkey").
 PWRKEY_NAME_HINTS = ("pwrkey", "power-key")
@@ -145,6 +146,61 @@ def lock_display():
         log(f"WARNING: failed to lock sessions: {e}")
 
 
+def get_power_profile():
+    """Return the current power profile name (e.g. 'performance', 'balanced')."""
+    try:
+        out = subprocess.check_output(
+            [BUSCTL, "get-property",
+             "org.freedesktop.UPower.PowerProfiles",
+             "/org/freedesktop/UPower/PowerProfiles",
+             "org.freedesktop.UPower.PowerProfiles",
+             "ActiveProfile"],
+            text=True, timeout=5, stderr=subprocess.DEVNULL).strip()
+        if out:
+            return out.split('"')[1] if '"' in out else out.split()[-1]
+    except Exception:
+        pass
+    return None
+
+
+def set_power_profile(profile):
+    """Set the system power profile via tuned-ppd D-Bus interface."""
+    try:
+        subprocess.run(
+            [BUSCTL, "set-property",
+             "org.freedesktop.UPower.PowerProfiles",
+             "/org/freedesktop/UPower/PowerProfiles",
+             "org.freedesktop.UPower.PowerProfiles",
+             "ActiveProfile", "s", profile],
+            timeout=5, capture_output=True)
+        log(f"set power profile to {profile}")
+    except Exception as e:
+        log(f"WARNING: failed to set power profile: {e}")
+
+
+def save_power_profile(profile):
+    """Save the current power profile to /run for restoration later."""
+    try:
+        with open(POWER_PROFILE_FILE, "w") as f:
+            f.write(profile)
+    except Exception as e:
+        log(f"WARNING: failed to save power profile: {e}")
+
+
+def restore_power_profile():
+    """Restore the previously saved power profile."""
+    try:
+        with open(POWER_PROFILE_FILE, "r") as f:
+            profile = f.read().strip()
+        if profile:
+            set_power_profile(profile)
+            os.remove(POWER_PROFILE_FILE)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f"WARNING: failed to restore power profile: {e}")
+
+
 def simulate_user_activity(ui):
     """Inject a harmless key event to let GNOME wake and force a repaint."""
     try:
@@ -212,11 +268,14 @@ def main():
             mode = get_power_save_mode(uid, username)
             log(f"power key pressed, PowerSaveMode={mode}")
             if mode == 0:
+                save_power_profile(get_power_profile() or "balanced")
+                set_power_profile("power-saver")
                 set_power_save_mode(uid, username, 3)
                 lock_display()
             else:
                 simulate_user_activity(_ui)
                 set_power_save_mode(uid, username, 0)
+                restore_power_profile()
     except Exception as e:
         log(f"FATAL: error in event read loop: {e}")
         if _ui:
