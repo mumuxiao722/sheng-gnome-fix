@@ -81,15 +81,15 @@ Prebuilt packages are published as GitHub Releases; the Fedora rootfs build in
 [fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) fetches the
 released RPM when built with **desktop=GNOME**:
 
-- `sheng-gnome-fix-1.0.0-1.noarch.rpm` – version-independent noarch RPM (no
+- `sheng-gnome-fix-1.0-1.noarch.rpm` – version-independent noarch RPM (no
   `%{dist}`), installs on any Fedora release.
-- `sheng-gnome-fix_1.0.0_all.deb` – Debian/Ubuntu package
+- `sheng-gnome-fix_1.0_all.deb` – Debian/Ubuntu package
   (`Depends: python3, python3-evdev, glib2.0-bin, systemd`).
 
 Install:
 
-- Fedora: `sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.0.0-1.noarch.rpm`
-- Debian/Ubuntu: `sudo dpkg -i sheng-gnome-fix_1.0.0_all.deb`, then
+- Fedora: `sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.0-1.noarch.rpm`
+- Debian/Ubuntu: `sudo dpkg -i sheng-gnome-fix_1.0_all.deb`, then
   `sudo apt-get install -f` to fill in dependencies.
 
 A reboot is required after installing for the udev rule, the systemd

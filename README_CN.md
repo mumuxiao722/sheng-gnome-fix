@@ -70,15 +70,15 @@
 [fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) 的 rootfs 构建在
 **desktop=GNOME** 时直接拉取发布的 RPM：
 
-- `sheng-gnome-fix-1.0.0-1.noarch.rpm` – 不分版本的 noarch RPM（无 `%{dist}`
+- `sheng-gnome-fix-1.0-1.noarch.rpm` – 不分版本的 noarch RPM（无 `%{dist}`
   后缀），任意 Fedora 版本均可安装。
-- `sheng-gnome-fix_1.0.0_all.deb` – Debian/Ubuntu 包
+- `sheng-gnome-fix_1.0_all.deb` – Debian/Ubuntu 包
   （`Depends: python3, python3-evdev, glib2.0-bin, systemd`）。
 
 安装：
 
-- Fedora：`sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.0.0-1.noarch.rpm`
-- Debian/Ubuntu：`sudo dpkg -i sheng-gnome-fix_1.0.0_all.deb`，再用
+- Fedora：`sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.0-1.noarch.rpm`
+- Debian/Ubuntu：`sudo dpkg -i sheng-gnome-fix_1.0_all.deb`，再用
   `sudo apt-get install -f` 补全依赖。
 
 装完需重启，udev 规则、systemd drop-in/preset 与两个单元才会生效。若已装过旧的
