@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
 # Build the version-independent noarch RPM and place the artifact at the repo
-# top level (sheng-gnome-fix-1.0.0-1.noarch.rpm). Run inside a Fedora
+# top level (sheng-gnome-fix-1.2-1.noarch.rpm). Run inside a Fedora
 # container/chroot with rpm-build available (e.g. the DroidSpaces Fedora-44
 # container, or a podman run against a Fedora image).
 #
@@ -21,7 +21,7 @@ mkdir -p "$TOP"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 cp "$REPO_ROOT/sheng-gnome-fix.spec" "$TOP/SPECS/"
 
 cd "$REPO_ROOT"
-tar -czf "$TOP/SOURCES/sheng-gnome-fix-1.1.tar.gz" \
+tar -czf "$TOP/SOURCES/sheng-gnome-fix-1.2.tar.gz" \
     --exclude=.git \
     --exclude=DEBIAN \
     --exclude=sheng-gnome-fix.spec \
