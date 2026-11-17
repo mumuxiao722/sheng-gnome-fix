@@ -10,4 +10,8 @@ systemctl daemon-reload 2>/dev/null || true
 systemctl preset sheng-fake-tablet-mode.service sheng-power-key-toggle.service >/dev/null 2>&1 || \
 	systemctl enable sheng-fake-tablet-mode.service sheng-power-key-toggle.service >/dev/null 2>&1 || true
 
+# zz-sheng-gnome-fix.gschema.override only applies once the schema cache is
+# rebuilt. Depends guarantees glib-compile-schemas is present.
+glib-compile-schemas /usr/share/glib-2.0/schemas
+
 exit 0
