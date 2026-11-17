@@ -14,15 +14,19 @@
 #   1. hides the physical gpio-keys switch from libinput (udev rule), then
 #   2. creates a virtual input device reporting ONLY SW_TABLET_MODE, and
 #   3. reports SW_TABLET_MODE=1 only AFTER the real graphical user session
-#      starts (explicit 0->1 transition), which unlocks mutter auto-rotation.
+#      starts AND the pogo-pin keyboard is detached (explicit 0->1 edge),
+#      which unlocks mutter auto-rotation in tablet posture while keeping the
+#      cover touchpad active in laptop posture.
 # The device starts in laptop mode (OFF): Mutter gives native-portrait panels
 # one initial accelerometer update before applying tablet-mode policy.
 # Advertising ON before that update makes Mutter inhibit the sensor
 # immediately afterwards.
 # A 200 ms poll loop watches /proc for the *user's* gnome-shell (GDM's
 # gnome-shell is excluded via uid range and --mode=gdm) and reports ON after
-# 25 consecutive ticks. When the shell exits the switch returns to OFF, so a
-# restart of the graphical session always produces a fresh OFF -> ON edge.
+# 25 consecutive ticks, but only while the keyboard is detached. Attaching
+# the keyboard returns the switch to OFF (laptop posture, so libinput keeps
+# the i2c touchpad out of tablet-mode suspend); detaching it produces a fresh
+# 0->1 edge. The shell exiting does the same.
 #
 # Cover open/close handling (OLD implementation, kept): blank the display on
 # close via PowerSaveMode=3, wake and unblank on open via KEY_WAKEUP +
@@ -31,6 +35,7 @@
 #   nixos/hardware/xiaomi-sheng/sensors/default.nix  (systemd.services.fake-tablet-mode)
 #   docs/hall-sensor-rotation.md
 
+import glob
 import os
 import signal
 import subprocess
@@ -53,8 +58,12 @@ NOBODY_UID = 65534
 GDM_CMD_ARG = b"--mode=gdm"
 SHELL_COMM = b"gnome-shell"
 
+POGO_KEYBOARD_VENDOR = "15d9"
+POGO_KEYBOARD_PRODUCT = "00a3"
+
 _ui = None
 _stopping = False
+_warned_paths = set()
 
 
 def log(msg):
@@ -72,6 +81,30 @@ def get_real_lid_device():
         except Exception:
             continue
     return None
+
+
+def is_keyboard_attached():
+    """True when the pogo-pin Xiaomi Keyboard is enumerated.
+
+    The keyboard shows up on the i2c bus with vendor/product 15d9:00a3. Its
+    presence is the only reliable posture signal on sheng: the DTB hall
+    sensor reports SW_TABLET_MODE=0 unconditionally, so keyboard presence is
+    used to decide between laptop and tablet posture instead.
+    """
+    for id_path in glob.glob("/sys/class/input/input*/id"):
+        try:
+            with open(os.path.join(id_path, "vendor")) as fv, \
+                    open(os.path.join(id_path, "product")) as fp:
+                vendor = fv.read().strip().lower()
+                product = fp.read().strip().lower()
+        except OSError as e:
+            if id_path not in _warned_paths:
+                _warned_paths.add(id_path)
+                log(f"WARNING: cannot read {id_path}: {e}")
+            continue
+        if vendor == POGO_KEYBOARD_VENDOR and product == POGO_KEYBOARD_PRODUCT:
+            return True
+    return False
 
 
 def find_active_session(user_only=False):
@@ -245,16 +278,23 @@ def main():
             if graphical_user_shell_running():
                 if shell_ticks < USER_SHELL_DELAY_TICKS:
                     shell_ticks += 1
-                if not enabled and shell_ticks == USER_SHELL_DELAY_TICKS:
-                    set_tablet_mode(True)
-                    enabled = True
-                    log("SW_TABLET_MODE=ON")
             else:
                 shell_ticks = 0
+
+            kb_attached = is_keyboard_attached()
+            target_mode = (
+                shell_ticks >= USER_SHELL_DELAY_TICKS and not kb_attached
+            )
+
+            if target_mode != enabled:
+                enabled = target_mode
+                set_tablet_mode(enabled)
                 if enabled:
-                    set_tablet_mode(False)
-                    enabled = False
+                    log("SW_TABLET_MODE=ON; keyboard detached")
+                elif shell_ticks < USER_SHELL_DELAY_TICKS:
                     log("SW_TABLET_MODE=OFF; graphical user shell exited")
+                else:
+                    log("SW_TABLET_MODE=OFF; keyboard attached")
             time.sleep(POLL_SEC)
     finally:
         if enabled:
