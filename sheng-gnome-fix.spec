@@ -19,7 +19,7 @@
 %undefine __debug_package
 %undefine _debugsource_packages
 Name:           sheng-gnome-fix
-Version:        1.1
+Version:        1.2
 Release:        1
 Summary:        GNOME sleep/display/toggle fixes for the Xiaomi Pad 6S Pro (sheng)
 
@@ -91,6 +91,12 @@ glib-compile-schemas /usr/share/glib-2.0/schemas &>/dev/null || :
 /usr/share/glib-2.0/schemas/zz-sheng-gnome-fix.gschema.override
 
 %changelog
+* Wed Nov 18 2026 mumuxiao722 <zy349931@163.com> - 1.2-1
+- Report SW_TABLET_MODE from pogo-pin keyboard presence (15d9:00a3), so
+  libinput no longer suspends the i2c touchpad while the cover is attached.
+  Detaching the keyboard still unlocks mutter auto-rotation.
+- Accept libglib2.0-bin (Debian trixie rename) via an OR-dependency.
+
 * Fri Sep 19 2026 mumuxiao722 <zy349931@163.com> - 1.1-1
 - Power key toggle now switches to power-saver profile on blank and restores
   previous profile on wake (via tuned-ppd D-Bus interface).

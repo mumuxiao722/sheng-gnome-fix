@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 #
 # Build the .deb package and place the artifact at the repo top level
-# (sheng-gnome-fix_1.0.0_all.deb). Uses dpkg-deb (--root-owner-group).
+# (sheng-gnome-fix_1.2_all.deb). Uses dpkg-deb (--root-owner-group).
 #
 # The source tree follows the Linux sysroot layout. Each daemon lives in its
 # own directory with a /usr/ subtree; shared configs live in common/usr/.
@@ -33,9 +33,9 @@ cp "$REPO_ROOT/DEBIAN/control" "$REPO_ROOT/DEBIAN/postinst" \
    "$STAGE/DEBIAN/"
 chmod 755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm" "$STAGE/DEBIAN/postrm"
 
-dpkg-deb --build --root-owner-group "$STAGE" "$REPO_ROOT/sheng-gnome-fix_1.1_all.deb"
+dpkg-deb --build --root-owner-group "$STAGE" "$REPO_ROOT/sheng-gnome-fix_1.2_all.deb"
 
 rm -rf "$STAGE"
 
 echo "=== sheng-gnome-fix DEB build complete ==="
-ls -la "$REPO_ROOT"/sheng-gnome-fix_1.1_all.deb
+ls -la "$REPO_ROOT"/sheng-gnome-fix_1.2_all.deb
