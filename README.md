@@ -24,9 +24,11 @@ Two small systemd services run at boot:
    in laptop mode (OFF); every 200 ms the daemon scans `/proc` for the
    *user's* `gnome-shell` (the GDM greeter's shell is excluded via uid range
    and `--mode=gdm`) and, after 25 consecutive ticks (~5 s), flips the switch
-   0->1 to unlock mutter panel-orientation management. When the shell exits
-   the switch drops back to OFF, so any session restore produces a fresh 0->1
-   edge. Cover close/open blanks via `org.gnome.Mutter.DisplayConfig`
+   0->1 to unlock mutter panel-orientation management - but only while the
+   pogo-pin keyboard is detached. Attaching the keyboard returns the switch to
+   0 (laptop posture), which also keeps libinput from suspending the i2c
+   touchpad; detaching it produces a fresh 0->1 edge. The same happens when
+   the shell exits. Cover close/open blanks via `org.gnome.Mutter.DisplayConfig`
    `PowerSaveMode`. The core service has been replaced by a new implementation;
    lid open/close still uses the old one.
 
@@ -81,15 +83,15 @@ Prebuilt packages are published as GitHub Releases; the Fedora rootfs build in
 [fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) fetches the
 released RPM when built with **desktop=GNOME**:
 
-- `sheng-gnome-fix-1.0-1.noarch.rpm` – version-independent noarch RPM (no
+- `sheng-gnome-fix-1.2-1.noarch.rpm` – version-independent noarch RPM (no
   `%{dist}`), installs on any Fedora release.
-- `sheng-gnome-fix_1.0_all.deb` – Debian/Ubuntu package
-  (`Depends: python3, python3-evdev, glib2.0-bin, systemd`).
+- `sheng-gnome-fix_1.2_all.deb` – Debian/Ubuntu package
+  (`Depends: python3, python3-evdev, glib2.0-bin | libglib2.0-bin, systemd`).
 
 Install:
 
-- Fedora: `sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.0-1.noarch.rpm`
-- Debian/Ubuntu: `sudo dpkg -i sheng-gnome-fix_1.0_all.deb`, then
+- Fedora: `sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.2-1.noarch.rpm`
+- Debian/Ubuntu: `sudo dpkg -i sheng-gnome-fix_1.2_all.deb`, then
   `sudo apt-get install -f` to fill in dependencies.
 
 A reboot is required after installing for the udev rule, the systemd

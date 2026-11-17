@@ -20,8 +20,10 @@
    改由虚拟 `uinput` 设备上报 `SW_TABLET_MODE`。设备启动即处于笔记本态（OFF），
    之后每 200ms 扫描 `/proc` 寻找**用户**的 `gnome-shell`（通过 uid 范围与
    `--mode=gdm` 排除 GDM 登录界面），连续 25 个 tick（约 5 秒）后才将开关 0→1，
-   解锁 mutter 面板方向管理；shell 退出时开关立即回落 OFF，因此会话重启总能产生
-   一次新的 0→1 边沿。合盖/开盖通过 `org.gnome.Mutter.DisplayConfig`
+   解锁 mutter 面板方向管理——但仅在 pogo-pin 键盘未连接时如此。接上键盘后开关
+   回落到 0（笔记本姿态），这同时让 libinput 不再挂起 i2c 触摸板；拔下键盘则重新
+   产生一次 0→1 边沿。shell 退出时行为相同。合盖/开盖通过
+   `org.gnome.Mutter.DisplayConfig`
    `PowerSaveMode` 控制息屏/亮屏。核心服务已被新实现替代，开盖盒盖仍然沿用旧实现。
 
 2. **`sheng-power-key-toggle`** —— 电源键只切息屏，绝不睡眠
@@ -70,15 +72,15 @@
 [fedora-sheng](https://github.com/mumuxiao722/fedora-sheng) 的 rootfs 构建在
 **desktop=GNOME** 时直接拉取发布的 RPM：
 
-- `sheng-gnome-fix-1.0-1.noarch.rpm` – 不分版本的 noarch RPM（无 `%{dist}`
+- `sheng-gnome-fix-1.2-1.noarch.rpm` – 不分版本的 noarch RPM（无 `%{dist}`
   后缀），任意 Fedora 版本均可安装。
-- `sheng-gnome-fix_1.0_all.deb` – Debian/Ubuntu 包
-  （`Depends: python3, python3-evdev, glib2.0-bin, systemd`）。
+- `sheng-gnome-fix_1.2_all.deb` – Debian/Ubuntu 包
+  （`Depends: python3, python3-evdev, glib2.0-bin | libglib2.0-bin, systemd`）。
 
 安装：
 
-- Fedora：`sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.0-1.noarch.rpm`
-- Debian/Ubuntu：`sudo dpkg -i sheng-gnome-fix_1.0_all.deb`，再用
+- Fedora：`sudo dnf install --nogpgcheck ./sheng-gnome-fix-1.2-1.noarch.rpm`
+- Debian/Ubuntu：`sudo dpkg -i sheng-gnome-fix_1.2_all.deb`，再用
   `sudo apt-get install -f` 补全依赖。
 
 装完需重启，udev 规则、systemd drop-in/preset 与两个单元才会生效。若已装过旧的
